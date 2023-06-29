@@ -1,18 +1,25 @@
 import sys
 import math
 import time
+import threading
 from packet import Packet
 import socket
 
 # Global Variables
-MAX_DATA_SIZE = Packet.MAX_DATA_LENGTH
+MAX_DATA_SIZE = Packet.MAX_DATA_LENGTH  # 500
+SEQ_MODULO = Packet.SEQ_NUM_MODULO  # 32
 MAX_WINDOW_SIZE = 10
+N = 1  # initial window size
+MAX_SEQ_NUM = 31
+TIMEOUT = 0  # initial value (in seconds)
 
-curr_seq_num = 0
+last_unacked_seqnum = 0
 next_seq_num = 0
-timer = 0
-timeout_state = False
+last_acked_seq_num = 0
+eot_state = False
+start_time = 0
 
+lock = threading.Lock()  # lock for critical sections
 
 # Global variables for logs
 log_seq_num = []
@@ -39,6 +46,8 @@ def file_to_packets(filename):
 
 
 def start_connection(sender_udp_sock, emulator_addr, emulator_rcv_port):
+    global eot_state
+
     syn_packet = Packet.create_syn()
     conn_flag = False
 
@@ -50,21 +59,98 @@ def start_connection(sender_udp_sock, emulator_addr, emulator_rcv_port):
         ptype, seq_num, length, data = Packet.parse_bytes_data(message)
         if ptype == 3:
             conn_flag = True
+            eot_state = True
             break
 
     return conn_flag
 
 
-def send_packets_to_receiver(packets_all, sender_udp_sock, emulator_addr, emulator_rcv_port):
-    n = 1  # initial window size
+def send_packets_to_receiver(packets_all, num_of_packets, sender_udp_sock, emulator_addr, emulator_rcv_port):
+    global start_time, last_unacked_seqnum, next_seq_num, N
 
-    if n <= MAX_WINDOW_SIZE:
+    # start checking for ACKs in a separate thread #
+    receive_ack_thread = threading.Thread(target=receive_ack, args=(sender_udp_sock,))
+    receive_ack_thread.start()
+
+    lock.acquire()
+    start_time = time.time()
+    lock.release()
+
+    local_n = 0  # local loop counter to control the number of packets sent in a window is equal to N
+    np = 0  # local variable to check if all packets are sent
+    while not eot_state:  # connection between sender and receiver has not been terminated with EOT yet
+        if time.time() - start_time < TIMEOUT:
+            if N <= MAX_WINDOW_SIZE:
+                while local_n < N and np < num_of_packets:
+                    sender_udp_sock.sendto(packets_all[next_seq_num].send_data_as_bytes(), (emulator_addr, emulator_rcv_port))
+                    np += 1
+                    last_unacked_seqnum = next_seq_num
+                    next_seq_num += 1
+                    local_n += 1
+                local_n = 0
+
+                if next_seq_num == SEQ_MODULO:
+                    next_seq_num = 0
+
+                if np == num_of_packets:  # all packets have been sent
+                    # check if all ACKs have been received or not
+                    # if yes, move to connection termination stage
+                    # todo
+
+            else:
+                N = 1
+                local_n = 0
+
+        else:  # timeout has occurred
+            # resend un-ACKed packet only and reset timer
+            sender_udp_sock.sendto(packets_all[last_unacked_seqnum].send_data_as_bytes(), (emulator_addr, emulator_rcv_port))
+
+            lock.acquire()
+            start_time = time.time()
+            lock.release()
+
+
+def receive_ack(sender_udp_sock):
+    global eot_state, last_acked_seq_num, start_time
+
+    while not eot_state:  # connection between sender and rcvr has not been terminated with EOT yet
+        message = sender_udp_sock.recvfrom(4096)[0]
+        ptype, seq_num, length, data = Packet.parse_bytes_data(message)
+
+        if ptype == 2:  # EOT packet received
+            lock.acquire()
+            eot_state = True  # this variable value is used in send packet function
+            lock.release()
+            break
+
+        elif ptype == 0:  # ACK packet received
+            if seq_num > last_acked_seq_num:  # new ACK packet
+                last_acked_seq_num = seq_num
+
+                if last_acked_seq_num < last_unacked_seqnum:  # there are some previously transmitted but unacked packets
+                    lock.acquire()
+                    start_time = time.time()
+                    lock.release()
+
+                else:
+                    lock.acquire()
+                    start_time = 0
+                    lock.release()
+
+            elif seq_num < last_acked_seq_num: # ACK for some previous out-of-order packet received
+
+            elif seq_num == last_acked_seq_num:  # duplicate ACK
+
+
+
+
 
 
 
 
 
 def main():
+    global TIMEOUT
 
     # Check if input format is correct or not
     if len(sys.argv) != 6:
@@ -74,7 +160,7 @@ def main():
         emulator_addr = sys.argv[1]
         emulator_rcv_port = int(sys.argv[2])
         sender_rcv_port = int(sys.argv[3])
-        timeout = int(sys.argv[4])  # in milliseconds
+        TIMEOUT = float(sys.argv[4]) * 0.001  # input in milliseconds, convert to seconds
         filename = sys.argv[5]
 
     # Stage 1 - Connection establishment - Send a SYN packet to receiver
@@ -87,11 +173,10 @@ def main():
         # Stage 2 - data transfer
         # Convert file to packets
         packets_all, num_of_packets = file_to_packets(filename)
-
+        send_packets_to_receiver(packets_all, num_of_packets, sender_udp_sock, emulator_addr, emulator_rcv_port)
 
     else:
         print("No connection established with receiver")
-
 
 
 if __name__ == '__main__':
