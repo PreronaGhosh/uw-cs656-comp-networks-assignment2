@@ -55,12 +55,17 @@ def start_connection(sender_udp_sock, emulator_addr, emulator_rcv_port):
         sender_udp_sock.sendto(syn_packet.send_data_as_bytes(), (emulator_addr, emulator_rcv_port))
         time.sleep(3)
 
-        message = sender_udp_sock.recvfrom(1024)[0]
-        ptype, seq_num, length, data = Packet.parse_bytes_data(message)
-        if ptype == 3:
-            conn_flag = True
-            eot_state = True
-            break
+        try:
+            message = sender_udp_sock.recvfrom(2048)[0]
+            ptype, seq_num, length, data = Packet.parse_bytes_data(message)
+
+            if ptype == 3:
+                conn_flag = True
+                eot_state = True
+                break
+
+        except BlockingIOError:
+            pass
 
     return conn_flag
 
@@ -119,7 +124,7 @@ def receive_ack(sender_udp_sock):
     global eot_state, last_acked_seq_num, start_time, N
 
     while not eot_state:  # connection between sender and rcvr has not been terminated with EOT yet
-        message = sender_udp_sock.recvfrom(4096)[0]
+        message = sender_udp_sock.recvfrom(2048)[0]
         ptype, seq_num, length, data = Packet.parse_bytes_data(message)
 
         if ptype == 2:  # EOT packet received
