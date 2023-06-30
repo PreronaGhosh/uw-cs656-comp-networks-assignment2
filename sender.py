@@ -78,16 +78,25 @@ def send_packets_to_receiver(packets_all, num_of_packets, sender_udp_sock, emula
 
     local_n = 0  # local loop counter to control the number of packets sent in a window is equal to N
     np = 0  # local variable to check if all packets are sent
+
+    lock.acquire()
+    local_last_ack = last_acked_seq_num
+    lock.release()
+
     while not eot_state:  # connection between sender and receiver has not been terminated with EOT yet
         if time.time() - start_time < TIMEOUT:
             if N <= MAX_WINDOW_SIZE:
-                while local_n < N and np < num_of_packets:
+                while local_n < N and np < num_of_packets:  # window is full when this condition fails or all packets have been sent
                     sender_udp_sock.sendto(packets_all[next_seq_num].send_data_as_bytes(), (emulator_addr, emulator_rcv_port))
                     np += 1
                     last_unacked_seqnum = next_seq_num
                     next_seq_num += 1
                     local_n += 1
-                local_n = 0
+
+                lock.acquire()
+                if local_last_ack < last_acked_seq_num:  # checks if window has space to transmit
+                    local_n = local_n - (last_acked_seq_num - local_last_ack)
+                lock.release()
 
                 if next_seq_num == SEQ_MODULO:
                     next_seq_num = 0
@@ -97,21 +106,17 @@ def send_packets_to_receiver(packets_all, num_of_packets, sender_udp_sock, emula
                     # if yes, move to connection termination stage
                     # todo
 
-            else:
-                N = 1
-                local_n = 0
 
         else:  # timeout has occurred
             # resend un-ACKed packet only and reset timer
             sender_udp_sock.sendto(packets_all[last_unacked_seqnum].send_data_as_bytes(), (emulator_addr, emulator_rcv_port))
-
             lock.acquire()
             start_time = time.time()
             lock.release()
 
 
 def receive_ack(sender_udp_sock):
-    global eot_state, last_acked_seq_num, start_time
+    global eot_state, last_acked_seq_num, start_time, N
 
     while not eot_state:  # connection between sender and rcvr has not been terminated with EOT yet
         message = sender_udp_sock.recvfrom(4096)[0]
@@ -127,12 +132,16 @@ def receive_ack(sender_udp_sock):
             if seq_num > last_acked_seq_num:  # new ACK packet
                 last_acked_seq_num = seq_num
 
+                lock.acquire()
+                N = 10 if N == 10 else N + 1  # window size capped at 10
+                lock.release()
+
                 if last_acked_seq_num < last_unacked_seqnum:  # there are some previously transmitted but unacked packets
                     lock.acquire()
                     start_time = time.time()
                     lock.release()
 
-                else:
+                elif last_acked_seq_num == last_unacked_seqnum:  # no outstanding packets
                     lock.acquire()
                     start_time = 0
                     lock.release()
