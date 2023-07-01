@@ -1,49 +1,62 @@
+# Packet definition for CS 456/656 Winter 2021 Assignment 2
+import struct
+
 class Packet:
-    MAX_DATA_LENGTH = 500
-    SEQ_NUM_MODULO = 32
+    """
+        Constructs a Packet either by specifying the fields, or providing a byte encoded Packet constructed by encode
+        Construction by fields:
+            Packet(type, seqnum, length, data)
+                type - the type of packet, 0 = ACK, 1 = data, 2 = EOT, 3 = Handshake
+                seqnum - the seqeunce number mod 32
+                length - the length of data AT MOST 500
+                data - the data being sent
+        Construction by encoded Packet
+            Packet(encoded_packet)
+                encoded_packet - a packet encoded as a bytes object
+    """
+    def __init__(self, *args):
+        if len(args) == 1:
+            if not isinstance(args[0], bytes):
+                raise RuntimeError("Received one argument and expect bytes. Got={}\n".format(type(args[0])))
+            self.typ, self.seqnum, self.length, self.data = struct.unpack('!iii{}s'.format(len(args[0]) - 12), args[0])
+            _, _, _, self.data = struct.unpack('!iii{}s'.format(self.length), args[0])
+            self.data = self.data.decode('ASCII')[0:self.length]
+        else:
+            if len(args[3]) > 500:
+                raise RuntimeError("messages to be sent should be at most 500 characters long")
+            self.typ = int(args[0])
+            self.seqnum = int(args[1])
+            self.length = int(args[2])
+            self.data = args[3]
 
-    def __init__(self, ptype, seq_num, length, data):
-        if len(data) > self.MAX_DATA_LENGTH:
-            print("Data is too large, max data should be 500")
+    """
+        Returns self encoded as a bytes object to be sent over the network
+    """
+    def encode(self):
+        encoded_data = self.data.encode('ASCII')
+        return struct.pack('!iii{}s'.format(self.length), self.typ, self.seqnum, self.length, encoded_data)
 
-        self.ptype = ptype
-        self.seq_num = seq_num % self.SEQ_NUM_MODULO
-        self.length = length
-        self.data = data
+    """
+        Returns the type, seqnum, length, and data of a packet
+    """
+    def decode(self):
+        return int(self.typ), int(self.seqnum), int(self.length), self.data
 
-    @staticmethod
-    def create_packet(seq_num, length, data):
-        return Packet(1, seq_num, length, data)
+    """
+        Returns a string representation of a packet
+    """
+    def __repr__(self):
+        ret = "Type=" + str(self.typ) + "\n"
+        ret += "Seqnum=" + str(self.seqnum) + "\n"
+        ret += "Length=" + str(self.length) + "\n"
+        ret += "Data=" + self.data
+        return ret
 
-    @staticmethod
-    def create_ack(seq_num):
-        return Packet(0, seq_num, 0, "")
-
-    @staticmethod
-    def create_eot(seq_num):
-        return Packet(2, seq_num, 0, "")
-
-    @staticmethod
-    def create_syn():
-        return Packet(3, 0, 0, "")
-
-    def send_data_as_bytes(self):
-        obj = bytearray()
-        obj.extend(self.ptype.to_bytes(length=4, byteorder="big"))
-        obj.extend(self.seq_num.to_bytes(length=4, byteorder="big"))
-        obj.extend(self.length.to_bytes(length=4, byteorder="big"))
-        obj.extend(self.data.encode())
-        return obj
-
-    @staticmethod
-    def parse_bytes_data(udp_data):
-        ptype = int.from_bytes(udp_data[0:4], byteorder="big")
-        seq_num = int.from_bytes(udp_data[4:8], byteorder="big")
-        length = int.from_bytes(udp_data[8:12], byteorder="big")
-
-        if ptype == 1:
-            data = udp_data[12:12+length].decode()
-            return ptype, seq_num, length, data
-
-        elif ptype == 0 or ptype == 2 or ptype == 3:
-            return ptype, seq_num, 0, ""
+if __name__ == '__main__':
+    testmsg = "testmsg"
+    packet1 = Packet(0, 1, len(testmsg), testmsg)
+    print(packet1)
+    packet1_enc = packet1.encode()
+    print(packet1_enc)
+    packet2 = Packet(packet1_enc)
+    print(packet2)
