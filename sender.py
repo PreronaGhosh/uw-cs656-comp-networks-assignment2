@@ -159,6 +159,7 @@ def send_receive_packets(packets_all, num_of_packets, sender_udp_sock, emulator_
 
             # retransmit the packet that caused retransmission
             sender_udp_sock.sendto(packets_all[curr_packet - num_unacked_packets].encode(), (emulator_addr, emulator_rcv_port))
+            write_log_files('seqnum', (curr_packet - num_unacked_packets) % SEQ_MODULO , timestamp)
             timer = datetime.now()
 
         # Check if ACK packet has been received - non blocking code
