@@ -37,6 +37,11 @@ def receive_data(receiver_udp_socket, filename, emulator_addr, emu_recv_port):
         packet = receiver_udp_socket.recvfrom(2048)[0]
         ptype, seqnum, length, data = Packet(packet).decode()
 
+        if ptype == 3:  # Received a SYN packet for re-request from sender after initial SYN packet from receiver got lost
+            conn_state = accept_send_syn(receiver_udp_socket, emulator_addr, emu_recv_port)
+            if conn_state:
+                continue
+
         log_seq(seqnum)
 
         if seqnum == exp_seqnum:  # handle valid packet

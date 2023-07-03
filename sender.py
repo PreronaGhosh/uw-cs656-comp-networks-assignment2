@@ -64,6 +64,8 @@ def start_connection(sender_udp_sock, emulator_addr, emulator_rcv_port):
             message = sender_udp_sock.recvfrom(2048)[0]
             ptype, seq_num, length, data = Packet(message).decode()
             if ptype == 3:
+                # Log SYN in ack.log
+                write_log_files('ack', 'SYN', -1)
                 conn_flag = True
                 break
 
