@@ -67,7 +67,7 @@ diff sampledata output
 
 I have made sure that there were no differences between the two files.
 
-I have used the file `sampledata` which would require more than 32 packets to transmit and the file `input` to test data transfer which would need less than 32 packets.
+I have used the file `sampledata` which would require more than 32 packets to transmit and the file `input2` to test data transfer which would need less than 32 packets.
 ## Versions
 
 I have used Python version `3.10.11` to implement this assignment.
