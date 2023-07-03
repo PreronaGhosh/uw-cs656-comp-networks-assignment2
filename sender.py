@@ -22,7 +22,6 @@ def file_to_packets(filename):
     packets_all = []  # list of all packets created from the data
 
     num_of_packets = math.ceil(len(data) / MAX_DATA_SIZE) + 1  # Add 1 for EOT packet
-    print(num_of_packets, flush=True)
 
     # Add content of text file as data to every packet
     for i in range(num_of_packets - 1):
@@ -33,7 +32,6 @@ def file_to_packets(filename):
 
     # Add an EOT packet
     packets_all.append(Packet(2, (num_of_packets-1) % SEQ_MODULO, 0, ""))
-    print(len(packets_all), flush=True)
 
     return packets_all, num_of_packets
 
@@ -53,23 +51,18 @@ def write_log_files(log_type, seqnum, t):
 
 
 def start_connection(sender_udp_sock, emulator_addr, emulator_rcv_port):
-    print("inside start_connection()", flush=True)
     conn_flag = False
     sender_udp_sock.settimeout(3)
 
     while True:
-        print("here2", flush=True)
         packet = Packet(3, 0, 0, "")
         sender_udp_sock.sendto(packet.encode(), (emulator_addr, emulator_rcv_port))
         write_log_files('seqnum', 'SYN', -1)
         time.sleep(3)
 
         try:
-            print("here3", flush=True)
             message = sender_udp_sock.recvfrom(2048)[0]
-            print(message)
             ptype, seq_num, length, data = Packet(message).decode()
-            print(seq_num)
             if ptype == 3:
                 conn_flag = True
                 break
@@ -109,9 +102,8 @@ def send_receive_packets(packets_all, num_of_packets, sender_udp_sock, emulator_
     global timer, num_unacked_packets, next_seqnum, N
 
     timestamp = 0
-    write_log_files('N', N, 0)
+    write_log_files('N', N, timestamp)
 
-    print("Ready to send packets", flush=True)
     curr_packet = 0  # holds position of the packet in packets_all list
 
     while True:
@@ -139,7 +131,7 @@ def send_receive_packets(packets_all, num_of_packets, sender_udp_sock, emulator_
 
                     except BlockingIOError:
                         continue
-                print("Received EOT, closing connection", flush=True)
+
                 break
 
         elif num_unacked_packets < N:
@@ -147,7 +139,6 @@ def send_receive_packets(packets_all, num_of_packets, sender_udp_sock, emulator_
             if num_unacked_packets == 0:
                 timer = datetime.now()   # first packet of a new window
 
-            print("num_unacked_packets: ", num_unacked_packets, flush=True)
             sender_udp_sock.sendto(packets_all[curr_packet].encode(), (emulator_addr, emulator_rcv_port))
 
             timestamp += 1
@@ -159,7 +150,6 @@ def send_receive_packets(packets_all, num_of_packets, sender_udp_sock, emulator_
 
         # if timeout has occurred
         if timer and (datetime.now() - timer).microseconds > TIMEOUT * 1000:
-            print("Timeout has occurred", flush=True)
             N = 1
 
             timestamp += 1
@@ -167,7 +157,6 @@ def send_receive_packets(packets_all, num_of_packets, sender_udp_sock, emulator_
 
             # retransmit the packet that caused retransmission
             sender_udp_sock.sendto(packets_all[curr_packet - num_unacked_packets].encode(), (emulator_addr, emulator_rcv_port))
-            print("retrans pack pos is:", curr_packet - num_unacked_packets, flush=True)
             timer = datetime.now()
 
         # Check if ACK packet has been received - non blocking code
@@ -189,11 +178,11 @@ def send_receive_packets(packets_all, num_of_packets, sender_udp_sock, emulator_
 
             # check if it's a new ACK
             if is_between(ack_seqnum % SEQ_MODULO, (next_seqnum - num_unacked_packets) % SEQ_MODULO, next_seqnum % SEQ_MODULO):
-                num_acked_packets = 1 + ack_seqnum - (next_seqnum - num_unacked_packets) % 32  # count num packets we can consider ACKed now
+                last_acked = (next_seqnum - num_unacked_packets) % SEQ_MODULO
+                num_acked_packets = ack_seqnum - last_acked + 1
 
                 if num_acked_packets <= num_unacked_packets:
                     num_unacked_packets -= num_acked_packets  # update spare room in window
-                    print("num of unacked packets:", num_unacked_packets, flush=True)
 
                 if N == 10:  # window size capped at 10
                     N = 10
@@ -202,19 +191,9 @@ def send_receive_packets(packets_all, num_of_packets, sender_udp_sock, emulator_
                     write_log_files('N', N, timestamp)
 
                 if num_unacked_packets > 0:
-                    print("Timer reset as num_unacked > 0", flush=True)
                     timer = datetime.now()
-                elif num_unacked_packets < 0 and curr_packet <= num_of_packets -1:
-                    print("Timer stopped", flush=True)
+                elif num_unacked_packets <= 0 and curr_packet <= num_of_packets - 1:
                     timer = None
-
-    # timestamp += 1
-    # sender_udp_sock.settimeout(None)
-    # rcvd_eot_packet = sender_udp_sock.recvfrom(2048)[0]
-    # ptype, eot_seqnum, length, data = Packet(rcvd_eot_packet).decode()
-    # if ptype == 2:
-    #     write_log_files('ack', 'EOT', timestamp)
-    #     sender_udp_sock.close()
 
 
 def main():
@@ -234,7 +213,6 @@ def main():
         TIMEOUT = int(sys.argv[4])  # milliseconds
         filename = sys.argv[5]
 
-    print(f"Timeout: {TIMEOUT}")
     # Stage 1 - Connection establishment - Send a SYN packet to receiver
     sender_udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sender_udp_sock.bind(('', sender_rcv_port))
@@ -242,18 +220,13 @@ def main():
     conn_state = start_connection(sender_udp_sock, emulator_addr, emulator_rcv_port)
 
     if conn_state:
-        print("Connection established")
-        # Stage 2 - data transfer
         # Convert file to packets
         packets_all, num_of_packets = file_to_packets(filename)
-        print("Created all packets", flush=True)
 
         sender_udp_sock.settimeout(0)
 
+        # Stage 2 & 3 - data transfer and connection termination stages
         send_receive_packets(packets_all, num_of_packets, sender_udp_sock, emulator_addr, emulator_rcv_port)
-
-    else:
-        print("No connection established with receiver")
 
 
 if __name__ == '__main__':
