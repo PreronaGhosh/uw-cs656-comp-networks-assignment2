@@ -1,5 +1,5 @@
 
-# CS 656 - Assignment 2
+# Congestion Controlled Network Protocol over UDP
 
 Author : Prerona Ghosh
 
