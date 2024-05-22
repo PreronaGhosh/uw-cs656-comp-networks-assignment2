@@ -1,12 +1,6 @@
 
 # Congestion Controlled Network Protocol over UDP
 
-Author : Prerona Ghosh
-
-Student ID: 21048873
-
-
-
 ## Description
 
 The goal of this assignment is to implement a Congestion Controlled pipelined Reliable Data Transfer (RDT) protocol over UDP, which could be used to transfer a text file from one host to another across an unreliable network. The protocol implemented is unidirectional and we can transfer data from only sender to the receiver programs and not the other way around.
